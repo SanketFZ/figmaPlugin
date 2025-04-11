@@ -1,0 +1,108 @@
+#Approach
+
+##Selection Handling
+
+The plugin listens for image selections via figma.currentPage.selection.
+It validates the type of selected nodes to ensure they are images or frames with image fills.
+
+##Image Byte Extraction
+
+For each selected image
+Image bytes are fetched using getImageBytesAsync() (a Figma Plugin API method).
+Metadata such as width and height is also extracted.
+
+##Client-side Image Analysis (Canvas)
+
+Once the image is loaded in the UI:
+Dominant Color Detection:
+Pixel data from canvas is analyzed.
+Color frequency is mapped and sorted to find top 3 dominant RGB values.
+
+##Estimation of Complexity of image
+
+Based on the resolution:
+Low (<150k pixels), Medium (<400k), High (>400k)
+
+##Blur Detection:
+
+Calculates variance in grayscale intensity across the image.
+Low variance indicates blurriness.
+
+##Text Detection
+
+High-contrast edges are counted.
+If contrast crosses a threshold, text is likely present.
+
+##Figma API Usage
+
+The plugin uses a UI built with HTML/CSS/JS and communicates with the Figma plugin code via postMessage.A lightweight Node.js backend bridges the plugin with Google Cloud’s Vision API, since direct access isn’t possible due to CORS and credentials security.
+
+
+#Decision Making
+
+Figma Plugin API was used to capture selected image bytes and metadata.
+
+Canvas-based pixel analysis was used in-browser to extract:
+Dominant colors
+Complexity level (based on resolution)
+Blur detection (via variance of grayscale intensity)
+High-contrast edge detection to approximate text presence
+Tessaract.js was used to perform OCR and return detected text with high accuracy.
+
+
+Challenges and Solutions
+
+1. For determining Blurriness in the image
+
+Solution :-
+Extracts grayscale values from the image using standard luminance formula:
+gray=0.299𝑅+0.587𝐺+0.114𝐵
+
+Computes the mean and variance of grayscale values across the whole image.
+If variance is low, the image is likely blurry (edges and contrast are minimal).
+ 
+-Sharp images have a lot of pixel intensity variation, so variance is high.
+-Blurry images are uniform, with low variance in intensity.
+
+
+
+2. For text Detection
+
+Solution:-
+Loops through each pair of horizontally adjacent pixels.
+Calculates their luminance difference.
+If the contrast between adjacent pixels is high (> 100), it's considered a text-like edge.
+If enough such differences exist (more than 500), it concludes that text is likely present.
+
+
+-Text regions tend to have sharp changes in color—like black text on a white background.
+-This approach doesn't require OCR but gives a quick heuristic.
+
+
+usage in code
+const blurStatus = isBlurry(ctx, width, height) ? "Blurry" : "Clear";
+const textStatus = hasText(ctx, width, height) ? "Detected" : "Not Detected";
+
+
+
+
+
+
+# Plugin Setup
+Create a free account on Figma
+
+Install Figma Desktop App 
+
+Download and install Node.js
+
+Install Figma Plugin development tools:
+
+run on Command Prompt
+
+npm install -g figplug
+ 
+to use plugin open figma Desktop paste any image on Figma Canvas
+In Plugins Section Import plugin via manifest.json
+and plugin will be in use 
+
+

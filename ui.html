@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f7fa;
+      color: #333;
+    }
+
+    h2 {
+      font-size: 24px;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+      margin-bottom: 16px;
+      padding: 16px;
+      transition: all 0.3s ease-in-out;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .card-header h3 {
+      font-size: 16px;
+      margin: 0;
+    }
+
+    .toggle-icon {
+      font-size: 18px;
+      user-select: none;
+    }
+
+    .card-content {
+      margin-top: 12px;
+      display: none;
+    }
+
+    .card-content img {
+      max-width: 100%;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .color-swatch {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      margin-right: 6px;
+      vertical-align: middle;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    .info {
+      margin: 6px 0;
+      line-height: 1.6;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 14px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s ease-in-out;
+      margin-bottom: 20px;
+    }
+
+    button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <h2>Image Analyzer</h2>
+  <button id="refresh">Refresh</button>
+  <div id="results"></div>
+
+  <script>
+    document.getElementById("refresh").onclick = () => {
+      parent.postMessage({ pluginMessage: { type: 'analyze-image' } }, '*');
+    };
+
+    function createImageCard(data, index) {
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const header = document.createElement("div");
+      header.className = "card-header";
+      header.innerHTML = `
+        <h3>Image ${index + 1}</h3>
+        <span class="toggle-icon">▼</span>
+      `;
+
+      const content = document.createElement("div");
+      content.className = "card-content";
+
+      const imgBlob = new Blob([new Uint8Array(data.imageBytes)], { type: 'image/png' });
+      const imgURL = URL.createObjectURL(imgBlob);
+      const img = new Image();
+      img.src = imgURL;
+
+      img.onload = async() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = data.width;
+        canvas.height = data.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, data.width, data.height);
+        const colors = getDominantColors(imageData);
+
+        const complexity = getComplexity(data.width * data.height);
+        const blurStatus = isBlurry(ctx, data.width, data.height) ? "Blurry" : "Clear";
+        const textStatus = hasText(ctx, data.width, data.height) ? "Detected" : "Not Detected";
+
+        const { data: { text } } = await Tesseract.recognize(img, 'eng', {
+                          logger: m => console.log(m)
+                        });
+
+        const infoHTML = `
+          <img src="${imgURL}" alt="Analyzed Image" />
+          <div class="info"><strong>Width:</strong> ${data.width}px</div>
+          <div class="info"><strong>Height:</strong> ${data.height}px</div>
+          <div class="info"><strong>Dominant Colors:</strong><br/>${colors.map(color => `<span class="color-swatch" style="background:${color}"></span> ${color}`).join('<br/>')}</div>
+          <div class="info"><strong>Complexity:</strong> ${complexity}</div>
+          <div class="info"><strong>Quality:</strong> ${blurStatus}</div>
+          <div class="info"><strong>Text:</strong> ${textStatus}</div>
+          <strong>Text Detected:</strong><br/><pre style="white-space: pre-wrap; background: #eee; padding: 8px; border-radius: 5px;">${text.trim()}</pre>
+        `;
+
+        content.innerHTML = infoHTML;
+      };
+
+      header.onclick = () => {
+        content.style.display = content.style.display === "block" ? "none" : "block";
+        header.querySelector('.toggle-icon').textContent = content.style.display === "block" ? "▲" : "▼";
+      };
+
+      card.appendChild(header);
+      card.appendChild(content);
+      return card;
+    }
+
+    function getDominantColors(imageData, numColors = 3) {
+      const colorMap = {};
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i+1], b = data[i+2];
+        const key = `${r},${g},${b}`;
+        colorMap[key] = (colorMap[key] || 0) + 1;
+      }
+      return Object.entries(colorMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, numColors)
+        .map(([key]) => "rgb(" + key + ")");
+    }
+
+    function getComplexity(pixels) {
+      if (pixels > 400000) return "High";
+      if (pixels > 150000) return "Medium";
+      return "Low";
+    }
+
+    function isBlurry(ctx, width, height) {
+      const imageData = ctx.getImageData(0, 0, width, height);
+      let sum = 0, sumSq = 0;
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        const gray = 0.299 * imageData.data[i] + 0.587 * imageData.data[i+1] + 0.114 * imageData.data[i+2];
+        sum += gray;
+        sumSq += gray * gray;
+      }
+      const n = width * height;
+      const mean = sum / n;
+      const variance = (sumSq / n) - (mean * mean);
+      return variance < 500;
+    }
+
+    function hasText(ctx, width, height) {
+      const imageData = ctx.getImageData(0, 0, width, height);
+      let contrastCount = 0;
+      for (let i = 0; i < imageData.data.length - 4; i += 4) {
+        const lum1 = 0.299 * imageData.data[i] + 0.587 * imageData.data[i+1] + 0.114 * imageData.data[i+2];
+        const lum2 = 0.299 * imageData.data[i+4] + 0.587 * imageData.data[i+5] + 0.114 * imageData.data[i+6];
+        if (Math.abs(lum1 - lum2) > 100) contrastCount++;
+      }
+      return contrastCount > 500;
+    }
+
+    onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      const resultsContainer = document.getElementById("results");
+      resultsContainer.innerHTML = "";
+
+      if (msg.error) {
+        resultsContainer.innerText = msg.error;
+        return;
+      }
+
+      msg.images.forEach((imageData, index) => {
+        const card = createImageCard(imageData, index);
+        resultsContainer.appendChild(card);
+      });
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4"></script>
+</body>
+</html>
